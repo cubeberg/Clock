@@ -1,0 +1,6 @@
+lnk*.cmd
+*.ccxml
+*.ccsproject
+*.project
+*.prefs
+*.cproject
