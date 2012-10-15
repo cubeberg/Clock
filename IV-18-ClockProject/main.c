@@ -22,7 +22,7 @@ void main(void) {
 	time.year = 0x2012;
 	time.mday = 0x01;
 
-	//setting up cloks - 16mhz, using external crystal
+	//setting up clocks - 16mhz, using external crystal
 	BCSCTL2 = SELM_0 + DIVM_0 + DIVS_2;
 	BCSCTL1 = CALBC1_16MHZ; // 16MHz clock
 	DCOCTL = CALDCO_16MHZ;
@@ -266,7 +266,7 @@ void displayTime(struct btm *t)
 	}
 
 	screen[4] = numbertable[(t->min & 0xF0)>>4];
-	screen[5] = numbertable[(t->min & 0x0F)];
+	screen[5] =numbertable[(t->min & 0x0F)];
 	screen[7] = numbertable[(t->sec & 0xF0)>>4];
 	screen[8] = numbertable[(t->sec & 0x0F)];
 }
@@ -458,8 +458,7 @@ __interrupt void TIMER1_A0_ISR(void)
 		}
 		else if (DisplayMode == ModeAlarm & settings_mode == 1)
 		{
-			if (setting_place == 0)
-				screen[alarm_index + 1] ^= numbertable[alarm_index+1];
+			Alarm_SettingTick();
 		}
 		if(alarm_duration == 0) //don't need to check if alarm is already on
 		{
@@ -471,7 +470,7 @@ __interrupt void TIMER1_A0_ISR(void)
 					if(check_alarm(&time,&alarms[alm_num]))
 					{
 						alarm_duration = ALARM_TIME; //turn alarm on
-						displayString("alarm",2);
+						displayString("alarm",5);
 						LPM0_EXIT;
 					}
 			}
@@ -621,33 +620,88 @@ void Alarm_ChangeSetting()
 {
 	if(setting_place == 0)
 	{
-		if (alarm_index >= NUM_ALARMS)
+		if (alarm_index >= (NUM_ALARMS - 1) && alarm_index < 99)
 		{
 			alarm_index = 0;
 			setting_place++;//move on to next setting now that we've covered the alarm enable
+		}
+		else if (alarm_index == 99) //just dropped into settings mode
+		{
+			setting_place == 0;//basically doing nothing
+			alarm_index = 0;
 		}
 		else
 			alarm_index++;
 
 	}
-	if(setting_place == 9)
+	else if(setting_place == 9)
 	{
-		if(alarm_index >= NUM_ALARMS)
+		if(alarm_index == NUM_ALARMS - 1)
 		{
 			setting_place = 0;
 			alarm_index = 0;
 		}
 		else
 		{
-			setting_place == 1;
+			setting_place = 1;
 			alarm_index++;
 		}
+	}
+	else
+	{
+		setting_place++;
+	}
+	if (setting_place == 1)
+	{
+		clearDisplay(1);
+		displayORString("alarm ", 6, 8);
+		screenOR[7] = numbertable[alarm_index + 1];
 	}
 	allow_repeat = 0;
 	switch(setting_place)
 	{
 		case 0:
 			Alarm_DisplayAlarms();
+			break;
+		case 1:
+			allow_repeat = 1;
+			displayAlarm(alarm_index, 0);
+			screen[1] |= 1;
+			screen[2] |= 1;
+			break;
+		case 2:
+			allow_repeat = 1;
+			displayAlarm(alarm_index, 0);
+			screen[4] |= 1;
+			screen[5] |= 1;
+			break;
+		case 3:
+			displayAlarm(alarm_index, 1);
+			screen[1] |= 1;
+			break;
+		case 4:
+			displayAlarm(alarm_index, 1);
+			screen[2] |= 1;
+			break;
+		case 5:
+			displayAlarm(alarm_index, 1);
+			screen[3] |= 1;
+			break;
+		case 6:
+			displayAlarm(alarm_index, 1);
+			screen[4] |= 1;
+			break;
+		case 7:
+			displayAlarm(alarm_index, 1);
+			screen[5] |= 1;
+			break;
+		case 8:
+			displayAlarm(alarm_index, 1);
+			screen[6] |= 1;
+			break;
+		case 9:
+			displayAlarm(alarm_index, 1);
+			screen[7] |= 1;
 			break;
 	}
 }
@@ -735,7 +789,76 @@ void Time_ChangeSetting()
 }
 void Alarm_ChangeValue(char add)
 {
-	//TODO: Finish
+	switch (setting_place)
+	{
+		case 1: //add to hour
+			clearDisplay(0);
+			if(add)
+			{
+				alarms[alarm_index].hour = _bcd_add_short(alarms[alarm_index].hour, 0x1);
+				if(alarms[alarm_index].hour > 0x23)
+					alarms[alarm_index].hour = 0;
+			}
+			else
+			{
+				alarms[alarm_index].hour = _bcd_add_short(alarms[alarm_index].hour, 0x9999);
+				if(alarms[alarm_index].hour > 0x23)
+					alarms[alarm_index].hour = 0x23;
+			}
+			displayAlarm(alarm_index, 0);
+			break;
+		case 2: //add to minute
+			clearDisplay(0);
+			if(add)
+			{
+				alarms[alarm_index].min = _bcd_add_short(alarms[alarm_index].min, 0x1);
+				if (alarms[alarm_index].min > 0x59)
+					alarms[alarm_index].min = 0;
+			}
+			else
+			{
+				alarms[alarm_index].min = _bcd_add_short(alarms[alarm_index].min, 0x9999);
+				if (alarms[alarm_index].min > 0x59)
+					alarms[alarm_index].min = 0x59;
+			}
+			displayAlarm(alarm_index, 0);
+			break;
+		case 3: //Sunday
+			alarms[alarm_index].daysOfWeek ^= BIT0;
+			displayAlarm(alarm_index, 1);
+			break;
+		case 4: //Monday
+			alarms[alarm_index].daysOfWeek ^= BIT1;
+			displayAlarm(alarm_index, 1);
+			break;
+		case 5: //tuesday
+			alarms[alarm_index].daysOfWeek ^= BIT2;
+			displayAlarm(alarm_index, 1);
+			break;
+		case 6: //wednesday
+			alarms[alarm_index].daysOfWeek ^= BIT3;
+			displayAlarm(alarm_index, 1);
+			break;
+		case 7: //thursday
+			alarms[alarm_index].daysOfWeek ^= BIT4;
+			displayAlarm(alarm_index, 1);
+			break;
+		case 8: //friday
+			alarms[alarm_index].daysOfWeek ^= BIT5;
+			displayAlarm(alarm_index, 1);
+			break;
+		case 9: //saturday
+			alarms[alarm_index].daysOfWeek ^= BIT6;
+			displayAlarm(alarm_index, 1);
+			break;
+		default: //alarm enable/disable
+			clearDisplay(0);
+			//1<<alarm_index
+			alarms_enabled ^= 1<<alarm_index; //toggle alarm enable state
+			Alarm_DisplayAlarms();
+			break;
+
+	}
 }
 void Time_ChangeValue(char add)
 {
@@ -956,8 +1079,9 @@ void alarm_off()
 //Sets up the alarm settings screen when settings entered
 void Alarm_InitSettings()
 {
-
+	clearDisplay(1);
 	displayORString("alarms",6,4);
+	setting_place = 0;
 	Alarm_DisplayAlarms();
 }
 //Alarm settings - setting 0 screen
@@ -1049,5 +1173,117 @@ void display_temp(int n, char override)
 	else
 	{
 		displayString(toDisplay_tmp,8);
+	}
+}
+
+void displayAlarm(char alarm_num, char display_type)
+{
+	clearDisplay(0);
+	if (display_type == 0) //time only
+	{
+		//print hour
+		if (hourMode == 0) //24h mode
+		{
+			screen[1] = numbertable[(alarms[alarm_num].hour & 0xF0)>>4];;
+			screen[2] = numbertable[(alarms[alarm_num].hour & 0x0F)];
+			screen[3] = 1;
+		}
+		else //12h mode
+		{
+			if (alarms[alarm_num].hour == 0x12)
+			{
+				screen[1] = numbertable[(alarms[alarm_num].hour & 0xF0)>>4];
+				screen[2] = numbertable[(alarms[alarm_num].hour & 0x0F)];
+				//screen[3] = alphatable[15]; //PM
+				screen[0] |= BIT0;//turn on dot
+			}
+			else if (alarms[alarm_num].hour == 0)
+			{
+				screen[1] = numbertable[1];
+				screen[2] = numbertable[2];
+				//screen[3] = alphatable[0]; //AM
+				screen[0] &= ~BIT0;//turn off dot
+			}
+			else if (alarms[alarm_num].hour > 0x12)
+			{
+				unsigned int localHour = 0;
+				localHour = _bcd_add_short(alarms[alarm_num].hour, 0x9988);
+				screen[1] = numbertable[(localHour & 0xF0)>>4];
+				screen[2] = numbertable[(localHour & 0x0F)];
+				//screen[3] = alphatable[15]; //PM
+				screen[0] |= BIT0;//turn on dot
+			}
+			else
+			{
+				screen[1] = numbertable[(alarms[alarm_num].hour & 0xF0)>>4];
+				screen[2] = numbertable[(alarms[alarm_num].hour & 0x0F)];
+				//screen[3] = alphatable[0]; //AM
+				screen[0] &= ~BIT0;//turn off dot
+			}
+		}
+
+		screen[4] = numbertable[(alarms[alarm_num].min & 0xF0)>>4];
+		screen[5] =numbertable[(alarms[alarm_num].min & 0x0F)];
+	}
+	else
+	{
+		displayString("smtwtfs",7);
+		if (alarms[alarm_num].daysOfWeek & BIT0)
+			screen[1] |= 1;
+		if (alarms[alarm_num].daysOfWeek & BIT1)
+			screen[2] |= 1;
+		if (alarms[alarm_num].daysOfWeek & BIT2)
+			screen[3] |= 1;
+		if (alarms[alarm_num].daysOfWeek & BIT3)
+			screen[4] |= 1;
+		if (alarms[alarm_num].daysOfWeek & BIT4)
+			screen[5] |= 1;
+		if (alarms[alarm_num].daysOfWeek & BIT5)
+			screen[6] |= 1;
+		if (alarms[alarm_num].daysOfWeek & BIT6)
+			screen[7] |= 1;
+	}
+
+
+}
+//gets fired once a second - lets us blink items when in settings mode
+void Alarm_SettingTick()
+{
+	switch(setting_place)
+	{
+		case 0:
+			screen[alarm_index + 1] ^= numbertable[alarm_index+1];
+			break;
+		case 1:
+			//displayAlarm(alarm_index, 0);
+			screen[1] ^= 1;
+			screen[2] ^= 1;
+			break;
+		case 2:
+			//displayAlarm(alarm_index, 0);
+			screen[4] ^= 1;
+			screen[5] ^= 1;
+			break;
+		case 3:
+			screen[1] ^= alphatable[18]; //s
+			break;
+		case 4:
+			screen[2] ^= alphatable[12]; //m
+			break;
+		case 5:
+			screen[3] ^= alphatable[19]; //t
+			break;
+		case 6:
+			screen[4] ^= alphatable[22]; //w
+			break;
+		case 7:
+			screen[5] ^= alphatable[19]; //t
+			break;
+		case 8:
+			screen[6] ^= alphatable[5]; //f
+			break;
+		case 9:
+			screen[7] ^= alphatable[18]; //s
+			break;
 	}
 }

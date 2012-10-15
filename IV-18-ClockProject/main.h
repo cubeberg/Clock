@@ -64,7 +64,9 @@ void clearDisplay(char buffer);
 void Time_ChangeSetting();
 void Time_ChangeValue(char add);
 void Alarm_InitSettings();
+void Alarm_SettingTick();
 void Alarm_DisplayAlarms();
+void displayAlarm(char alarm_num, char display_type);
 void Alarm_ChangeSetting();
 void Alarm_TickSetting(); //executes every second
 void Alarm_ChangeValue(char add);

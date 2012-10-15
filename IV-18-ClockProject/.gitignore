@@ -4,3 +4,4 @@ lnk*.cmd
 *.project
 *.prefs
 *.cproject
+Debug/
