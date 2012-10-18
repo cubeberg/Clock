@@ -73,7 +73,7 @@ void Alarm_ChangeValue(char add);
 void setScreen(char index, char value, char override);
 void alarm_off();
 int read_block(unsigned char *d, unsigned len);
-void display_temp(int n, char override);
+void display_temp(int n, char override,char type);
 
 //assembly functions
 void utoa(unsigned, char *);
@@ -83,12 +83,13 @@ void utoa(unsigned, char *);
 #define ModeAlarm  	1
 #define ModeTemp	2
 #define ModeText  	3
-#define ModeMax		3 //highest mode - drop back to 0 after
+#define ModeMax		2 //highest mode - drop back to 0 after
 
 //Global settings
 volatile char DisplayMode = 0; //See defines above for values
 volatile char bufferPlace = 0;
 char hourMode = 1; //0 = 24h, 1 = 12h
+char tempMode = 1; //0 = celsius, 1 = fahrenheit
 char settings_mode = 0;
 volatile char setting_place = 0;  //with multiple settings, keeps track of which we're on
 volatile char allow_repeat = 0; //if 1, holding down the button will increment values quickly

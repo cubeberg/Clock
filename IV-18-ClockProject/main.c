@@ -4,6 +4,9 @@
  * Christopher Berg
  * Compatible with V1.1 & V1.0 of the IV-18 Booster Pack
  *
+ * One-Wire Library for DS18B20 based on oPossum's code - http://www.43oh.com/forum/viewtopic.php?f=10&t=1425
+ * RTC Code based on oPossum's code - http://www.43oh.com/forum/viewtopic.php?f=10&t=2477&p=21670#p21670
+ *
  * 9/16/12 - adding alarm functionality
  */
 #include "msp430.h"
@@ -32,11 +35,15 @@ void main(void) {
 	P1DIR |= BIT0; //enable use of LED
 
 	VFD_BLANK_ON; //blank display for startup
+
+	//initialization routines
 	initSPI();
 	initDisplayTimer();
 	initClockTimer();
 	initUART();
 	initPeripherals();
+
+	//clear display
 	write(0x00,0x00);
 	_delay_cycles(10000); //wait for boost to bring up voltage
 	VFD_BLANK_OFF;//starting writes, turn display on
@@ -44,6 +51,7 @@ void main(void) {
 	//serial_setup(2, 1000000 / 9600);
 	one_wire_setup(&P1DIR, &P1IN, ONEWIRE_PIN, 16);
 	owex(0, 0); // Reset device
+	owex(0x33, 8); //read ROM
 	unsigned char b[16];
 
 
@@ -74,12 +82,19 @@ void main(void) {
 			{
 				owex(0, 0); owex(0x44CC, 16);						// Convert
 				//I tried to drop into low poer for a bit, but it didn't work - not sure why
-				__delay_cycles(800000);								// Wait for conversion to complete
+				__delay_cycles(100000);								// Wait for conversion to complete
 				owex(0, 0); owex(0xBECC, 16);						// Read temperature
 				read_block(b, 9);
 				temp_c = (b[1] << 8)| b[0];
-				temp_f = temp_c * 9 / 5 + (512);
+				temp_f = temp_c * 9 / 5 + (512); //convert temperature
 				take_temp = 0;
+				if (settings_mode == 0 && DisplayMode == ModeTemp)
+				{
+					if (tempMode == 0)
+						display_temp(temp_c,0,'C');
+					else
+						display_temp(temp_f,0,'F');
+				}
 			}
 			__bis_SR_register(LPM0_bits | GIE);       //enable interrupts, low power
 		}
@@ -279,8 +294,31 @@ void switchMode(char newMode)
 {
 	bufferPlace = 0;
 	DisplayMode = newMode;
-	if (DisplayMode == ModeAlarm)
+	if (DisplayMode == ModeTime)
+	{
+		clearDisplay(1);
+		displayORString("Clock", 5, 8);
+	}
+	else if (DisplayMode == ModeAlarm)
+	{
+		clearDisplay(1);
+		displayORString("Alarms", 6, 8);
 		Alarm_DisplayAlarms();
+	}
+	else if (DisplayMode == ModeTemp)
+	{
+		clearDisplay(1);
+		displayORString("Temp", 4,8);
+		if (tempMode == 0)
+			display_temp(temp_c,0,'C');
+		else
+			display_temp(temp_f,0,'F');
+	}
+	else if (DisplayMode == ModeText)
+	{
+		clearDisplay(1);
+		displayORString("Text", 4,8);
+	}
 }
 
 /*
@@ -416,7 +454,7 @@ __interrupt void USCI0RX_ISR(void)
 #pragma vector=TIMER1_A0_VECTOR
 __interrupt void TIMER1_A0_ISR(void)
 {
-	static unsigned int last_min = 99;
+	static unsigned int last_min = 99, last_sec = 99;
 	if (overrideTime > 0)
 		overrideTime--;
 	static char count = 0; //how many intervals - 4 = 1s
@@ -470,7 +508,7 @@ __interrupt void TIMER1_A0_ISR(void)
 					if(check_alarm(&time,&alarms[alm_num]))
 					{
 						alarm_duration = ALARM_TIME; //turn alarm on
-						displayString("alarm",5);
+						displayORString("alarm",5, 8);
 						LPM0_EXIT;
 					}
 			}
@@ -588,18 +626,27 @@ __interrupt void TIMER1_A0_ISR(void)
 		else if (settings_mode == 0 & S3_Time > 0)
 		{
 			if(DisplayMode == ModeTime)
-				display_temp(temp_f,1);
+			{
+				if (tempMode == 0)
+					display_temp(temp_c,1,'C');
+				else
+					display_temp(temp_f,1,'F');
+			}
 		}
 
 
 		S3_Time = 0;
 	}
 
-	if (time.min != last_min)
+	//take temp every 30 seconds
+	if (time.sec != last_sec)
 	{
-		last_min = time.min;
-		take_temp = 1;
-		LPM0_EXIT; //exit to take temperature
+		last_sec = time.sec;
+		if (time.sec == 0x30 | time.sec == 0x00)
+		{
+			take_temp = 1;
+			LPM0_EXIT;
+		}
 	}
 }
 /*
@@ -677,31 +724,31 @@ void Alarm_ChangeSetting()
 			break;
 		case 3:
 			displayAlarm(alarm_index, 1);
-			screen[1] |= 1;
+			//screen[1] |= 1;
 			break;
 		case 4:
 			displayAlarm(alarm_index, 1);
-			screen[2] |= 1;
+			//screen[2] |= 1;
 			break;
 		case 5:
 			displayAlarm(alarm_index, 1);
-			screen[3] |= 1;
+			//screen[3] |= 1;
 			break;
 		case 6:
 			displayAlarm(alarm_index, 1);
-			screen[4] |= 1;
+			//screen[4] |= 1;
 			break;
 		case 7:
 			displayAlarm(alarm_index, 1);
-			screen[5] |= 1;
+			//screen[5] |= 1;
 			break;
 		case 8:
 			displayAlarm(alarm_index, 1);
-			screen[6] |= 1;
+			//screen[6] |= 1;
 			break;
 		case 9:
 			displayAlarm(alarm_index, 1);
-			screen[7] |= 1;
+			//screen[7] |= 1;
 			break;
 	}
 }
@@ -1105,7 +1152,7 @@ int read_block(unsigned char *d, unsigned len)
 	return 0;
 }
 
-void display_temp(int n, char override)
+void display_temp(int n, char override, char type)
 {
 	char index = 0, temp = 0;
 	char toDisplay_tmp[8];
@@ -1120,7 +1167,6 @@ void display_temp(int n, char override)
 	}
 	utoa(n >> 4, s);
 
-	//puts(s);
 	for (temp = 0; temp < 4; temp++)
 	{
 		if(s[temp])
@@ -1145,7 +1191,6 @@ void display_temp(int n, char override)
 			index++;
 			toDisplay_tmp[index] = '0';
 		}
-		//puts(s);
 		for (temp = 0; temp < 2; temp++) //we only have room to print two decimal places
 		{
 			if(s[temp])
@@ -1165,7 +1210,7 @@ void display_temp(int n, char override)
 		//puts("0000");
 	}
 	toDisplay_tmp[index] = '°';
-	toDisplay_tmp[index + 1] = 'F';//TODO - pass what type of temperature
+	toDisplay_tmp[index + 1] = type;//TODO - pass what type of temperature
 	if (override)
 	{
 		displayORString(toDisplay_tmp,8,12);
