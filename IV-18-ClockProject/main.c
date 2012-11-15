@@ -15,7 +15,10 @@
 #include "main.h"  //look at this file for pin definitions, etc
 #include "one_wire.h"
 
+#define DEBUGTX //Enables serial debugging of printed text if defined
 
+volatile char TXBuffer[8];
+volatile char TXBufferLen = 0;
 
 
 void main(void) {
@@ -27,11 +30,13 @@ void main(void) {
 
 	//setting up clocks - 16mhz, using external crystal
 	BCSCTL2 = SELM_0 + DIVM_0 + DIVS_2;
+	DCOCTL = 0;
 	BCSCTL1 = CALBC1_16MHZ; // 16MHz clock
 	DCOCTL = CALDCO_16MHZ;
 	BCSCTL1 |= XT2OFF + DIVA_3;
 	BCSCTL3 = XT2S_0 + LFXT1S_0 + XCAP_3;
-
+	P1OUT = 0x02;
+	P1DIR |= 0x02;
 	P1DIR |= BIT0; //enable use of LED
 
 	VFD_BLANK_ON; //blank display for startup
@@ -48,56 +53,81 @@ void main(void) {
 	_delay_cycles(10000); //wait for boost to bring up voltage
 	VFD_BLANK_OFF;//starting writes, turn display on
 
-	//serial_setup(2, 1000000 / 9600);
 	one_wire_setup(&P1DIR, &P1IN, ONEWIRE_PIN, 16);
-	owex(0, 0); // Reset device
-	owex(0x33, 8); //read ROM
+	owex(0, 0);									// Reset
+	owex(0x33, 8);	// Read ROM
 	unsigned char b[16];
-
+	int tc, tf;
 
 	//Testing alarms - alarm on startup
-	alarms_enabled = 1;
-	alarms[0].daysOfWeek = 0xFF;
-	alarms[0].hour = 0;
-	alarms[0].min = 1;
+//	alarms_enabled = 1;
+//	alarms[0].daysOfWeek = 0xFF;
+//	alarms[0].hour = 0;
+//	alarms[0].min = 1;
 
 	switchMode(0);//set up time display
 
 	displayORString("startup",7,8);
 
 	__bis_SR_register(LPM0_bits | GIE);       //enable interrupts
+	for(;;) {
 
+		owex(0, 0); owex(0x44CC, 16);						// Convert
+		__delay_cycles(800000);								// Wait for conversion to complete
+		owex(0, 0); owex(0xBECC, 16);						// Read temperature
+		read_block(b, 9);
+
+		tc = b[1]; tc <<= 8; tc |= b[0];
+		temp_c = tc;
+
+		tf = tc * 9 / 5 + (512);
+		temp_f = tf;
+		if (settings_mode == 0 && DisplayMode == ModeTemp)
+		{
+			if (tempMode == 0)
+				display_temp(temp_c,0,'C');
+			else
+				display_temp(temp_f,0,'F');
+		}
+		P1OUT &= ~BIT0;
+		__bis_SR_register(LPM0_bits | GIE);       //enable interrupts
+		//__delay_cycles(1600000);
+	}
+
+	/*
+	__bis_SR_register(LPM0_bits | GIE);       //enable interrupts
 	while(1)
 		{
 		//check to see if alarm is on
-			while (alarm_duration > 0 && alarm_snooze == 0)
+//			while (alarm_duration > 0 && alarm_snooze == 0)
+//			{
+//				BUZ_ON; //toggle pin
+//				_delay_cycles(2500);
+//				BUZ_OFF;
+//				_delay_cycles(2500);
+//			}
+//			BUZ_OFF;
+			owex(0, 0); owex(0x44CC, 16);						// Convert
+			//I tried to drop into low poer for a bit, but it didn't work - not sure why
+
+			__delay_cycles(2000000);								// Wait for conversion to complete
+			owex(0, 0); owex(0xBECC, 16);						// Read temperature
+			read_block(b, 9);
+			temp_c = (b[1] << 8)| b[0];
+
+
+			temp_f = temp_c * 9 / 5 + (512); //convert temperature
+			take_temp = 0;
+			if (settings_mode == 0 && DisplayMode == ModeTemp)
 			{
-				BUZ_ON; //toggle pin
-				_delay_cycles(2500);
-				BUZ_OFF;
-				_delay_cycles(2500);
-			}
-			BUZ_OFF;
-			if(take_temp)
-			{
-				owex(0, 0); owex(0x44CC, 16);						// Convert
-				//I tried to drop into low poer for a bit, but it didn't work - not sure why
-				__delay_cycles(100000);								// Wait for conversion to complete
-				owex(0, 0); owex(0xBECC, 16);						// Read temperature
-				read_block(b, 9);
-				temp_c = (b[1] << 8)| b[0];
-				temp_f = temp_c * 9 / 5 + (512); //convert temperature
-				take_temp = 0;
-				if (settings_mode == 0 && DisplayMode == ModeTemp)
-				{
-					if (tempMode == 0)
-						display_temp(temp_c,0,'C');
-					else
-						display_temp(temp_f,0,'F');
-				}
+				if (tempMode == 0)
+					display_temp(temp_c,0,'C');
+				else
+					display_temp(temp_f,0,'F');
 			}
 			__bis_SR_register(LPM0_bits | GIE);       //enable interrupts, low power
 		}
+	*/
 }
 
 //Sets refresh rate for display
@@ -135,6 +165,7 @@ void initUART()
 	UCA0BR1 = 1;
 	UCA0CTL1 &= ~UCSWRST;
 	IE2 |= UCA0RXIE;                          // Enable USCI_A0 RX interrupt
+	IE2 |= UCA0TXIE; //enable TX interrupt for buffering
 }
 
 /*
@@ -376,75 +407,117 @@ __interrupt void TIMER0_A0_ISR(void)
 }
 
 /*
+ * Serial TX interrupt
+ *
+ */
+#pragma vector=USCIAB0TX_VECTOR
+__interrupt void USCI0TX_ISR(void)
+{
+#ifdef DEBUGTX
+	RunSerialTX();//trigger transmission of next character, if any
+#endif
+}
+#ifdef DEBUGTX
+void RunSerialTX()
+{
+	static char TXIndex = 0;
+	if (TXBufferLen > 0 && TXBufferLen < 90) //values above 90 used for other purposes
+	{
+		IE2 |= UCA0TXIE;                        // Enable USCI_A0 TX interrupt
+		UCA0TXBUF = TXBuffer[TXIndex];
+		TXIndex++;
+		if (TXIndex >= TXBufferLen)
+		{
+			TXIndex = 0;
+			TXBufferLen = 98;
+		}
+
+	}
+	else if(TXBufferLen == 98)
+	{
+		UCA0TXBUF = '\r';
+		TXBufferLen = 99;
+	}
+	else if (TXBufferLen == 99)
+	{
+		UCA0TXBUF = '\n';
+		TXBufferLen = 0;
+		IE2 &= ~UCA0TXIE;                       // Disable USCI_A0 TX interrupt
+	}
+	else
+		TXIndex = 0;
+}
+#endif
+/*
  * Serial RX interrupt
  *
  */
 #pragma vector=USCIAB0RX_VECTOR
 __interrupt void USCI0RX_ISR(void)
 {
-	static char place = 1;
-	static char serialBuffer[] ={0,0,0,0,0,0,0};
-	char waitMode = 1; //waiting for mode input
-
-	char rx = UCA0RXBUF;
-	if (waitMode == 1)
-	{
-		if (rx == 'T')
-			switchMode(0);
-		if (rx == 'M')
-			switchMode(1);
-		waitMode = 0;
-	}
-	else if (DisplayMode == 0)
-	{
-		serialBuffer[bufferPlace] = rx;
-		if (bufferPlace == 5 || rx == 13)
-		{
-			//buffer filled up - process command
-			unsigned int hour, min;
-			hour = (serialBuffer[0]-48) << 4;
-			hour |= (serialBuffer[1] - 48);
-			min = (serialBuffer[2]-48) << 4;
-			min |= (serialBuffer[3] - 48);
-			time.hour = hour;
-			time.min = min;
-
-			  while (!(IFG2&UCA0TXIFG));
-				  UCA0TXBUF = 'S';                    // respond as saved
-
-
-			serialBuffer[0] = 0;
-			serialBuffer[1] = 0;
-			serialBuffer[2] = 0;
-			serialBuffer[3] = 0;
-			serialBuffer[4] = 0;
-			bufferPlace = 0;
-			waitMode = 1;
-		}
-		else
-			bufferPlace++;
-	}
-	else if (DisplayMode == 1)
-	{
-		if (rx >= 97 & rx <= 122) //lowercase letters
-			screen[place] = alphatable[rx - 97];
-		else if (rx >= 65 & rx <= 90) //uppercase letters - use same table
-			screen[place] = alphatable[rx - 65];
-		else if (rx >= 48 & rx <= 57) //numbers
-			screen[place] = numbertable[rx - 48];
-		else if (rx == 32) //space
-			screen[place] = 0x00;
-		else if (rx == 46) //period
-		{
-			if (place > 1) //back up if we haven't wrapped to add a period to the previous character
-				place--;
-			screen[place] |= 1;
-		}
-
-		place++;
-		if (place > 8)
-			place = 1;
-	}
+//	static char place = 1;
+//	static char serialBuffer[] ={0,0,0,0,0,0,0};
+//	char waitMode = 1; //waiting for mode input
+//
+//	char rx = UCA0RXBUF;
+//	if (waitMode == 1)
+//	{
+//		if (rx == 'T')
+//			switchMode(0);
+//		if (rx == 'M')
+//			switchMode(1);
+//		waitMode = 0;
+//	}
+//	else if (DisplayMode == 0)
+//	{
+//		serialBuffer[bufferPlace] = rx;
+//		if (bufferPlace == 5 || rx == 13)
+//		{
+//			//buffer filled up - process command
+//			unsigned int hour, min;
+//			hour = (serialBuffer[0]-48) << 4;
+//			hour |= (serialBuffer[1] - 48);
+//			min = (serialBuffer[2]-48) << 4;
+//			min |= (serialBuffer[3] - 48);
+//			time.hour = hour;
+//			time.min = min;
+//
+//			  while (!(IFG2&UCA0TXIFG));
+//				  UCA0TXBUF = 'S';                    // respond as saved
+//
+//
+//			serialBuffer[0] = 0;
+//			serialBuffer[1] = 0;
+//			serialBuffer[2] = 0;
+//			serialBuffer[3] = 0;
+//			serialBuffer[4] = 0;
+//			bufferPlace = 0;
+//			waitMode = 1;
+//		}
+//		else
+//			bufferPlace++;
+//	}
+//	else if (DisplayMode == 1)
+//	{
+//		if (rx >= 97 & rx <= 122) //lowercase letters
+//			screen[place] = alphatable[rx - 97];
+//		else if (rx >= 65 & rx <= 90) //uppercase letters - use same table
+//			screen[place] = alphatable[rx - 65];
+//		else if (rx >= 48 & rx <= 57) //numbers
+//			screen[place] = numbertable[rx - 48];
+//		else if (rx == 32) //space
+//			screen[place] = 0x00;
+//		else if (rx == 46) //period
+//		{
+//			if (place > 1) //back up if we haven't wrapped to add a period to the previous character
+//				place--;
+//			screen[place] |= 1;
+//		}
+//
+//		place++;
+//		if (place > 8)
+//			place = 1;
+//	}
 }
 
 /*
@@ -454,7 +527,7 @@ __interrupt void USCI0RX_ISR(void)
 #pragma vector=TIMER1_A0_VECTOR
 __interrupt void TIMER1_A0_ISR(void)
 {
-	static unsigned int last_min = 99, last_sec = 99;
+	static unsigned int last_sec = 99;
 	if (overrideTime > 0)
 		overrideTime--;
 	static char count = 0; //how many intervals - 4 = 1s
@@ -500,6 +573,7 @@ __interrupt void TIMER1_A0_ISR(void)
 		}
 		if(alarm_duration == 0) //don't need to check if alarm is already on
 		{
+			BUZ_OFF;
 			alarm_snooze = 0;
 			int alm_num;
 			for (alm_num=0;alm_num < NUM_ALARMS; alm_num++)
@@ -508,6 +582,7 @@ __interrupt void TIMER1_A0_ISR(void)
 					if(check_alarm(&time,&alarms[alm_num]))
 					{
 						alarm_duration = ALARM_TIME; //turn alarm on
+						clearDisplay(1);
 						displayORString("alarm",5, 8);
 						LPM0_EXIT;
 					}
@@ -515,6 +590,7 @@ __interrupt void TIMER1_A0_ISR(void)
 		}
 		else
 		{
+			BUZ_TOGGLE;
 			alarm_duration--;
 
 			LPM0_EXIT;
@@ -645,6 +721,7 @@ __interrupt void TIMER1_A0_ISR(void)
 		if (time.sec == 0x30 | time.sec == 0x00)
 		{
 			take_temp = 1;
+			P1OUT |= BIT0;
 			LPM0_EXIT;
 		}
 	}
@@ -1071,10 +1148,18 @@ void displayORString(char * c, char len, char time)
 	char index = 1;
 	while(index - 1 < len & index -1 < 9) //as long as there are more characters, and we aren't past the edge of our display
 	{
-		//char toDisp = ;
-		screenOR[index] = translateChar(*c++);
+		char toDisp = *c++;
+#ifdef DEBUGTX
+		TXBuffer[index- 1] = toDisp;
+#endif
+		screenOR[index] = translateChar(toDisp);
 		index++;
 	}
+#ifdef DEBUGTX
+	TXBufferLen = len;
+	RunSerialTX();
+#endif
+
 	overrideTime = time;
 }
 char translateChar(char c)
@@ -1154,6 +1239,7 @@ int read_block(unsigned char *d, unsigned len)
 
 void display_temp(int n, char override, char type)
 {
+	clearDisplay(override);
 	char index = 0, temp = 0;
 	char toDisplay_tmp[8];
 	for (temp = 0; temp < 8; temp++)

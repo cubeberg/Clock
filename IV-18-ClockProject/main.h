@@ -103,4 +103,7 @@ volatile char overrideTime = 8;
 volatile char CustomMsg[20] = {'4','3','o','h','.','c','o','m',' ','r','u','l','e','z',0,0,0,0,0,0};
 volatile char CustomMsgLen = 14;
 
+//Serial debugging
+	void RunSerialTX();
+
 #endif /* MAIN_H_ */
