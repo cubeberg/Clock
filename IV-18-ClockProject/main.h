@@ -44,7 +44,7 @@ char alarm_snooze = 0;
 
 //temperature defines and variables
 volatile char take_temp = 0; //indicates that we should read the temperature
-int temp_c, temp_f;
+int temp_c, temp_c_1, temp_c_2, temp_f, temp_c_last;
 
 //Function Prototypes
 void initSPI();
@@ -74,11 +74,16 @@ void setScreen(char index, char value, char override);
 void alarm_off();
 int read_block(unsigned char *d, unsigned len);
 void display_temp(int n, char override,char type);
+int GetTemp();
 
 //assembly functions
 void utoa(unsigned, char *);
 
-//Mode values
+/*
+ * Mode Values
+ * New mode values should be defined here - add on anything you want!
+ * Change the ModeMax value to the highest mode to be used
+ */
 #define ModeTime  	0
 #define ModeAlarm  	1
 #define ModeTemp	2

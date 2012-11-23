@@ -56,8 +56,8 @@ void main(void) {
 	one_wire_setup(&P1DIR, &P1IN, ONEWIRE_PIN, 16);
 	owex(0, 0);									// Reset
 	owex(0x33, 8);	// Read ROM
-	unsigned char b[16];
-	int tc, tf;
+	//unsigned char b[16];
+	//int tc;
 
 	//Testing alarms - alarm on startup
 //	alarms_enabled = 1;
@@ -71,53 +71,20 @@ void main(void) {
 
 	__bis_SR_register(LPM0_bits | GIE);       //enable interrupts
 	for(;;) {
-
-		owex(0, 0); owex(0x44CC, 16);						// Convert
-		__delay_cycles(800000);								// Wait for conversion to complete
-		owex(0, 0); owex(0xBECC, 16);						// Read temperature
-		read_block(b, 9);
-
-		tc = b[1]; tc <<= 8; tc |= b[0];
-		temp_c = tc;
-
-		tf = tc * 9 / 5 + (512);
-		temp_f = tf;
-		if (settings_mode == 0 && DisplayMode == ModeTemp)
+		if(take_temp)
 		{
-			if (tempMode == 0)
-				display_temp(temp_c,0,'C');
-			else
-				display_temp(temp_f,0,'F');
-		}
-		P1OUT &= ~BIT0;
-		__bis_SR_register(LPM0_bits | GIE);       //enable interrupts
-		//__delay_cycles(1600000);
-	}
+			temp_c = GetTemp();
+			temp_c_1 = GetTemp();
+			temp_c_2 = GetTemp();
 
-	/*
-	__bis_SR_register(LPM0_bits | GIE);       //enable interrupts
-	while(1)
-		{
-		//check to see if alarm is on
-//			while (alarm_duration > 0 && alarm_snooze == 0)
-//			{
-//				BUZ_ON; //toggle pin
-//				_delay_cycles(2500);
-//				BUZ_OFF;
-//				_delay_cycles(2500);
-//			}
-//			BUZ_OFF;
-			owex(0, 0); owex(0x44CC, 16);						// Convert
-			//I tried to drop into low poer for a bit, but it didn't work - not sure why
-
-			__delay_cycles(2000000);								// Wait for conversion to complete
-			owex(0, 0); owex(0xBECC, 16);						// Read temperature
-			read_block(b, 9);
-			temp_c = (b[1] << 8)| b[0];
+			//take lowest of three values - seems to return the best temperature
+			if(temp_c > temp_c_1)
+				temp_c = temp_c_1;
+			if(temp_c > temp_c_2)
+				temp_c = temp_c_2;
 
 
-			temp_f = temp_c * 9 / 5 + (512); //convert temperature
-			take_temp = 0;
+			temp_f = temp_c * 9 / 5 + (512);
 			if (settings_mode == 0 && DisplayMode == ModeTemp)
 			{
 				if (tempMode == 0)
@@ -125,9 +92,12 @@ void main(void) {
 				else
 					display_temp(temp_f,0,'F');
 			}
-			__bis_SR_register(LPM0_bits | GIE);       //enable interrupts, low power
+			P1OUT &= ~BIT0;
+			take_temp = 0;
 		}
-	*/
+		__bis_SR_register(LPM0_bits | GIE);       //enable interrupts
+		//__delay_cycles(800000);
+	}
 }
 
 //Sets refresh rate for display
@@ -277,14 +247,12 @@ void displayTime(struct btm *t)
 		{
 			screen[1] = numbertable[(t->hour & 0xF0)>>4];
 			screen[2] = numbertable[(t->hour & 0x0F)];
-			//screen[3] = alphatable[15]; //PM
 			screen[0] |= BIT0;//turn on dot
 		}
 		else if (t->hour == 0)
 		{
 			screen[1] = numbertable[1];
 			screen[2] = numbertable[2];
-			//screen[3] = alphatable[0]; //AM
 			screen[0] &= ~BIT0;//turn off dot
 		}
 		else if (t->hour > 0x12)
@@ -293,14 +261,12 @@ void displayTime(struct btm *t)
 			localHour = _bcd_add_short(t->hour, 0x9988);
 			screen[1] = numbertable[(localHour & 0xF0)>>4];
 			screen[2] = numbertable[(localHour & 0x0F)];
-			//screen[3] = alphatable[15]; //PM
 			screen[0] |= BIT0;//turn on dot
 		}
 		else
 		{
 			screen[1] = numbertable[(t->hour & 0xF0)>>4];
 			screen[2] = numbertable[(t->hour & 0x0F)];
-			//screen[3] = alphatable[0]; //AM
 			screen[0] &= ~BIT0;//turn off dot
 		}
 	}
@@ -319,7 +285,6 @@ void displayTime(struct btm *t)
 
 /*
  * If anything special needs to happen between modes, it should be added here
- * Not really being used yet, but leaving in case it's needed
  */
 void switchMode(char newMode)
 {
@@ -450,11 +415,13 @@ void RunSerialTX()
 #endif
 /*
  * Serial RX interrupt
- *
+ * Planned use - RX from GPS,
+ * PC or connected device to set time, change settings, etc.
  */
 #pragma vector=USCIAB0RX_VECTOR
 __interrupt void USCI0RX_ISR(void)
 {
+
 //	static char place = 1;
 //	static char serialBuffer[] ={0,0,0,0,0,0,0};
 //	char waitMode = 1; //waiting for mode input
@@ -584,7 +551,7 @@ __interrupt void TIMER1_A0_ISR(void)
 						alarm_duration = ALARM_TIME; //turn alarm on
 						clearDisplay(1);
 						displayORString("alarm",5, 8);
-						LPM0_EXIT;
+						//LPM0_EXIT;
 					}
 			}
 		}
@@ -593,7 +560,7 @@ __interrupt void TIMER1_A0_ISR(void)
 			BUZ_TOGGLE;
 			alarm_duration--;
 
-			LPM0_EXIT;
+			//LPM0_EXIT;
 		}
 		count = 0;
 	}
@@ -718,10 +685,11 @@ __interrupt void TIMER1_A0_ISR(void)
 	if (time.sec != last_sec)
 	{
 		last_sec = time.sec;
+		//take temperature every 30 seconds
 		if (time.sec == 0x30 | time.sec == 0x00)
 		{
 			take_temp = 1;
-			P1OUT |= BIT0;
+			P1OUT |= BIT0;  //turn on LED - indicate we're taking the temperature
 			LPM0_EXIT;
 		}
 	}
@@ -1146,6 +1114,7 @@ void displayString(char * c, char len)
 void displayORString(char * c, char len, char time)
 {
 	char index = 1;
+	clearDisplay(1);
 	while(index - 1 < len & index -1 < 9) //as long as there are more characters, and we aren't past the edge of our display
 	{
 		char toDisp = *c++;
@@ -1417,4 +1386,22 @@ void Alarm_SettingTick()
 			screen[7] ^= alphatable[18]; //s
 			break;
 	}
+}
+//Reads the temperature from the DS18B20
+int GetTemp()
+{
+	unsigned char b[16];
+	int return_val;
+	owex(0, 0); owex(0x44CC, 16);						// Convert
+	__delay_cycles(800000);								// Wait for conversion to complete
+	owex(0, 0); owex(0xBECC, 16);						// Read temperature
+	read_block(b, 9);
+	//return_val = b[1]; return_val <<= 8; return_val |= b[0];
+	/*
+	 * b[1] seems to be one of the problem fields - returns 0x01 most of the time,
+	 * but when it doesn't - it's seriously wrong.  Works for room temp, not sure how it will work for higher or lower temps
+	 */
+	return_val = 0x01; return_val <<= 8; return_val |= b[0];
+	//tc = 0x01; tc <<= 8; tc |= b[0];
+	return return_val;
 }
