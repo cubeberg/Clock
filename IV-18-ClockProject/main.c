@@ -16,6 +16,7 @@
 #include "one_wire.h"
 
 #define DEBUGTX //Enables serial debugging of printed text if defined
+//#define NOXTAL //Enables running the clock without the 32.768 crystal - less accurate
 
 volatile char TXBuffer[8];
 volatile char TXBufferLen = 0;
@@ -28,8 +29,14 @@ void main(void) {
 	time.year = 0x2012;
 	time.mday = 0x01;
 
+#ifdef NOXTAL
+	//Using SMCLK divided by 4 for Timer1_A3 (clock tick) source - less accurate than an external crystal
+	BCSCTL2 = SELM_0 + DIVM_0 + DIVS_3;
+#else
 	//setting up clocks - 16mhz, using external crystal
 	BCSCTL2 = SELM_0 + DIVM_0 + DIVS_2;
+#endif
+
 	DCOCTL = 0;
 	BCSCTL1 = CALBC1_16MHZ; // 16MHz clock
 	DCOCTL = CALDCO_16MHZ;
@@ -105,7 +112,13 @@ void initDisplayTimer()
 {
 	TA0CCTL0 = CM_0 + CCIS_0 + OUTMOD_0 + CCIE;
 	TA0CTL = TASSEL_2 + ID_3 + MC_1;
+#ifdef NOXTAL
+	//This timer is running off of SMCLK too - had to reduce to fix refresh rate issues
+	TA0CCR0 = 500; //you can change the refresh rate by changing this value
+#else
+	//Refresh rate when we're using the crystal
 	TA0CCR0 = 1000; //you can change the refresh rate by changing this value
+#endif
 }
 
 /*
@@ -117,9 +130,15 @@ void initClockTimer()
 
 	//Init timer
 	TA1CCTL0 = CM_0 + CCIS_0 + OUTMOD_0 + CCIE;
-	//TA1CCR0 = 1023;
+#ifdef NOXTAL
+	//using SMCLK as source, divided by 8
+	TA1CCR0 = 62499;
+	TA1CTL = TASSEL_2 + ID_3 + MC_1;
+#else
+	//using ACLK as source, divided by 4
 	TA1CCR0 = 255;
 	TA1CTL = TASSEL_1 + ID_2 + MC_1;
+#endif
 }
 
 //Sets up 9600 baud serial connection
@@ -130,9 +149,16 @@ void initUART()
 	P1SEL2 |= BIT1 + BIT2 ;                     // P1.1 = RXD, P1.2=TXD
 	UCA0CTL1 |= UCSWRST;
 	UCA0CTL1 = UCSSEL_2 + UCSWRST;
+#ifdef NOXTAL
+	//different serial settings since NOXTAL modified SMCLK
+	UCA0MCTL = UCBRF_0 + UCBRS_3;
+	UCA0BR0 = 208;
+#else
+	//Serial settings when we're using the crystal
 	UCA0MCTL = UCBRF_0 + UCBRS_6;
 	UCA0BR0 = 160;
 	UCA0BR1 = 1;
+#endif
 	UCA0CTL1 &= ~UCSWRST;
 	IE2 |= UCA0RXIE;                          // Enable USCI_A0 RX interrupt
 	IE2 |= UCA0TXIE; //enable TX interrupt for buffering
@@ -168,6 +194,11 @@ void initPeripherals()
 {
 	P2DIR &= ~(S1_PIN|S2_PIN|S3_PIN);
 	P2REN |= (S1_PIN|S2_PIN|S3_PIN);
+#ifdef NOXTAL
+	P2SEL &= ~(BIT6 + BIT7); //turn off for xtal pins
+#else
+
+#endif
 	P1OUT &= ~BUZ_PIN;
 	P1DIR |= BUZ_PIN;
 }
