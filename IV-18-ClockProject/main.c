@@ -16,10 +16,11 @@
 #include "one_wire.h"
 
 #define DEBUGTX //Enables serial debugging of printed text if defined
-//#define NOXTAL //Enables running the clock without the 32.768 crystal - less accurate
+#define NOXTAL //Enables running the clock without the 32.768 crystal - less accurate
 
 volatile char TXBuffer[8];
 volatile char TXBufferLen = 0;
+volatile char RXBuffer[20];
 
 
 void main(void) {
@@ -452,7 +453,33 @@ void RunSerialTX()
 #pragma vector=USCIAB0RX_VECTOR
 __interrupt void USCI0RX_ISR(void)
 {
-
+	//TODO - add some sort of timeout for serial commands
+	static char inputState = 0;
+	static char bufferIndex = 0;
+	char rx = UCA0RXBUF;
+	if (inputState == 0) //ready to rcv a command
+	{
+		if (rx == '$') //beginning of a transmission
+		{
+			inputState = 1; //incoming serial transmission
+			bufferIndex = 0;
+		}
+	}
+	if (inputState == 1)
+	{
+		RXBuffer[bufferIndex] = rx;
+		bufferIndex++;
+		if (rx == ';') //end of transmission
+		{
+			inputState = 2;
+		}
+	}
+	if (inputState == 2)
+	{
+		ProcessRX(bufferIndex);
+		bufferIndex = 0;
+		inputState = 0;
+	}
 //	static char place = 1;
 //	static char serialBuffer[] ={0,0,0,0,0,0,0};
 //	char waitMode = 1; //waiting for mode input
@@ -1435,4 +1462,51 @@ int GetTemp()
 	return_val = 0x01; return_val <<= 8; return_val |= b[0];
 	//tc = 0x01; tc <<= 8; tc |= b[0];
 	return return_val;
+}
+
+void ProcessRX(char transLength)
+{
+	char inputType = 0;
+	char commandLength = transLength - 1;
+	if(transLength > 2)
+		inputType = RXBuffer[1];//first character after $ is transmission type
+	switch(inputType)
+	{
+		case 'T':
+			if (commandLength >= 4) //hours provided
+			{
+				char h1, h2;
+				if (RXBuffer[2] >= 48 & RXBuffer[2] <= 57) //ascii 0-9
+					h1 = RXBuffer[2] - 48;
+				if (RXBuffer[3] >= 48 & RXBuffer[3] <= 57) //ascii 0-9
+					h2 = RXBuffer[3] - 48;
+				time.hour = h1<<4 | h2;
+			}
+			if(commandLength >= 6) //minutes
+			{
+				char m1, m2;
+				if (RXBuffer[4] >= 48 & RXBuffer[4] <= 57) //ascii 0-9
+					m1 = RXBuffer[4] - 48;
+				if (RXBuffer[5] >= 48 & RXBuffer[5] <= 57) //ascii 0-9
+					m2 = RXBuffer[5] - 48;
+				time.min = m1<<4 | m2;
+			}
+			if(commandLength >= 8) //seconds
+			{
+				char s1, s2;
+				if (RXBuffer[6] >= 48 & RXBuffer[6] <= 57) //ascii 0-9
+					s1 = RXBuffer[6] - 48;
+				if (RXBuffer[7] >= 48 & RXBuffer[7] <= 57) //ascii 0-9
+					s2 = RXBuffer[7] - 48;
+				time.sec = s1<<4 | s2;
+			}
+			else
+				time.sec = 0; //reset seconds if not provided
+			break;
+		default:
+			//todo - send back error message
+			break;
+	}
+
+
 }

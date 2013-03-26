@@ -75,6 +75,7 @@ void alarm_off();
 int read_block(unsigned char *d, unsigned len);
 void display_temp(int n, char override,char type);
 int GetTemp();
+void ProcessRX(char transLength);
 
 //assembly functions
 void utoa(unsigned, char *);
