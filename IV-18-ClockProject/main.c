@@ -16,7 +16,7 @@
 #include "one_wire.h"
 
 #define DEBUGTX //Enables serial debugging of printed text if defined
-#define NOXTAL //Enables running the clock without the 32.768 crystal - less accurate
+//#define NOXTAL //Enables running the clock without the 32.768 crystal - less accurate
 
 volatile char TXBuffer[8];
 volatile char TXBufferLen = 0;
