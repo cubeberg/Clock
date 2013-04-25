@@ -2,7 +2,7 @@
  * main.c
  * V2.1.1
  * Christopher Berg
- * Compatible with V1.1 & V1.0 of the IV-18 Booster Pack
+ * Compatible with all revisions of the IV-18 Booster Pack
  *
  * One-Wire Library for DS18B20 based on oPossum's code - http://www.43oh.com/forum/viewtopic.php?f=10&t=1425
  * RTC Code based on oPossum's code - http://www.43oh.com/forum/viewtopic.php?f=10&t=2477&p=21670#p21670
